@@ -499,27 +499,60 @@ QUY TẮC BẮT BUỘC VỀ NỘI DUNG
   );
 };
 
-const CharacterThumbnailProcessor = ({ model, initialScript }: { model: string, initialScript: string }) => {
-  const [script, setScript] = useState(initialScript);
-  const [charList, setCharList] = useState('');
-  const [loadingChars, setLoadingChars] = useState(false);
-  const [ytUrl, setYtUrl] = useState('');
-  const [imgPreview, setImgPreview] = useState<string | null>(null);
-  const [generatedImg, setGeneratedImg] = useState<string | null>(null);
-  const [ocrResult, setOcrResult] = useState('');
+const CharacterThumbnailProcessor = ({ 
+  model, 
+  initialScript,
+  script,
+  setScript,
+  charList,
+  setCharList,
+  ytUrl,
+  setYtUrl,
+  imgPreview,
+  setImgPreview,
+  generatedImg,
+  setGeneratedImg,
+  ocrResult,
+  setOcrResult,
+  loadingChars,
+  setLoadingChars,
+  loadingGen,
+  setLoadingGen,
+  lastExtracted,
+  setLastExtracted
+}: { 
+  model: string, 
+  initialScript: string,
+  script: string,
+  setScript: (s: string) => void,
+  charList: string,
+  setCharList: (s: string) => void,
+  ytUrl: string,
+  setYtUrl: (s: string) => void,
+  imgPreview: string | null,
+  setImgPreview: (s: string | null) => void,
+  generatedImg: string | null,
+  setGeneratedImg: (s: string | null) => void,
+  ocrResult: string,
+  setOcrResult: (s: string) => void,
+  loadingChars: boolean,
+  setLoadingChars: (b: boolean) => void,
+  loadingGen: boolean,
+  setLoadingGen: (b: boolean) => void,
+  lastExtracted: string,
+  setLastExtracted: (s: string) => void
+}) => {
   const [loadingOCR, setLoadingOCR] = useState(false);
-  const [loadingGen, setLoadingGen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const lastExtractedRef = useRef('');
 
   useEffect(() => {
-    if (initialScript && initialScript !== script) {
+    if (initialScript && initialScript !== script && !script) {
       setScript(initialScript);
     }
   }, [initialScript]);
 
   useEffect(() => {
-    if (script && script !== lastExtractedRef.current && !loadingChars) {
+    if (script && script !== lastExtracted && !loadingChars) {
       handleExtractChars();
     }
   }, [script]);
@@ -527,7 +560,7 @@ const CharacterThumbnailProcessor = ({ model, initialScript }: { model: string, 
   const handleExtractChars = async () => {
     if (!script.trim()) return;
     setLoadingChars(true);
-    lastExtractedRef.current = script;
+    setLastExtracted(script);
     try {
       const prompt = `Xác định và liệt kê TẤT CẢ các tên nhân vật/vận động viên duy nhất được đề cập trong kịch bản này: ${script}`;
       const system = "Trích xuất tên nhân vật duy nhất từ kịch bản. Trả về danh sách phân cách bằng dấu phẩy. Chỉ sử dụng Tiếng Việt.";
@@ -703,30 +736,36 @@ const CharacterThumbnailProcessor = ({ model, initialScript }: { model: string, 
 const SEOProcessor = ({ 
   model, 
   initialScript,
+  script,
+  setScript,
   result,
   setResult,
   loading,
-  setLoading
+  setLoading,
+  lastProcessed,
+  setLastProcessed
 }: { 
   model: string, 
   initialScript: string,
+  script: string,
+  setScript: (s: string) => void,
   result: SEOData | null,
   setResult: (d: SEOData | null) => void,
   loading: boolean,
-  setLoading: (b: boolean) => void
+  setLoading: (b: boolean) => void,
+  lastProcessed: string,
+  setLastProcessed: (s: string) => void
 }) => {
-  const [script, setScript] = useState(initialScript);
   const [copied, setCopied] = useState<'desc' | 'all' | null>(null);
-  const lastProcessedRef = useRef('');
 
   useEffect(() => {
-    if (initialScript && initialScript !== script) {
+    if (initialScript && initialScript !== script && !script) {
       setScript(initialScript);
     }
   }, [initialScript]);
 
   useEffect(() => {
-    if (script && script !== lastProcessedRef.current && !loading) {
+    if (script && script !== lastProcessed && !loading) {
       handleProcess();
     }
   }, [script]);
@@ -734,7 +773,7 @@ const SEOProcessor = ({
   const handleProcess = async () => {
     if (!script.trim()) return;
     setLoading(true);
-    lastProcessedRef.current = script;
+    setLastProcessed(script);
     try {
       const prompt = `Tối ưu SEO cho kịch bản sau. 
       
@@ -1207,8 +1246,21 @@ export default function App() {
   const [paLoading, setPaLoading] = useState(false);
 
   // SEO state lifted to App
+  const [seoInput, setSeoInput] = useState('');
   const [seoResult, setSeoResult] = useState<SEOData | null>(null);
   const [seoLoading, setSeoLoading] = useState(false);
+  const [seoLastProcessed, setSeoLastProcessed] = useState('');
+
+  // Thumbnail state lifted to App
+  const [thumbScript, setThumbScript] = useState('');
+  const [charList, setCharList] = useState('');
+  const [ytUrl, setYtUrl] = useState('');
+  const [imgPreview, setImgPreview] = useState<string | null>(null);
+  const [generatedImg, setGeneratedImg] = useState<string | null>(null);
+  const [ocrResult, setOcrResult] = useState('');
+  const [thumbLoadingChars, setThumbLoadingChars] = useState(false);
+  const [thumbLoadingGen, setThumbLoadingGen] = useState(false);
+  const [thumbLastExtracted, setThumbLastExtracted] = useState('');
 
   return (
     <div className="min-h-screen flex flex-col font-sans relative">
@@ -1243,15 +1295,42 @@ export default function App() {
                 setLoading={setPaLoading}
               />
             )}
-            {activeTab === 'char-thumb' && <CharacterThumbnailProcessor model={model} initialScript={generatedScript} />}
+            {activeTab === 'char-thumb' && (
+              <CharacterThumbnailProcessor 
+                model={model} 
+                initialScript={generatedScript}
+                script={thumbScript}
+                setScript={setThumbScript}
+                charList={charList}
+                setCharList={setCharList}
+                ytUrl={ytUrl}
+                setYtUrl={setYtUrl}
+                imgPreview={imgPreview}
+                setImgPreview={setImgPreview}
+                generatedImg={generatedImg}
+                setGeneratedImg={setGeneratedImg}
+                ocrResult={ocrResult}
+                setOcrResult={setOcrResult}
+                loadingChars={thumbLoadingChars}
+                setLoadingChars={setThumbLoadingChars}
+                loadingGen={thumbLoadingGen}
+                setLoadingGen={setThumbLoadingGen}
+                lastExtracted={thumbLastExtracted}
+                setLastExtracted={setThumbLastExtracted}
+              />
+            )}
             {activeTab === 'seo' && (
               <SEOProcessor 
                 model={model} 
                 initialScript={generatedScript}
+                script={seoInput}
+                setScript={setSeoInput}
                 result={seoResult}
                 setResult={setSeoResult}
                 loading={seoLoading}
                 setLoading={setSeoLoading}
+                lastProcessed={seoLastProcessed}
+                setLastProcessed={setSeoLastProcessed}
               />
             )}
             {activeTab === 'history' && <HistoryProcessor />}
