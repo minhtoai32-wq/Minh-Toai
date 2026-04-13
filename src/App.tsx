@@ -20,7 +20,8 @@ import {
   Key,
   Plus,
   Trash2,
-  X
+  X,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getGeminiResponse, analyzeImage, generateImage, extractJSON, setUIKeys } from './lib/gemini';
@@ -112,10 +113,23 @@ const Header = ({ activeTab, setActiveTab, model, setModel }: {
   );
 };
 
-const TitleProcessor = ({ model }: { model: string }) => {
-  const [input, setInput] = useState('');
-  const [result, setResult] = useState('');
-  const [loading, setLoading] = useState(false);
+const TitleProcessor = ({ 
+  model,
+  input,
+  setInput,
+  result,
+  setResult,
+  loading,
+  setLoading
+}: { 
+  model: string,
+  input: string,
+  setInput: (s: string) => void,
+  result: string,
+  setResult: (s: string) => void,
+  loading: boolean,
+  setLoading: (b: boolean) => void
+}) => {
   const [copied, setCopied] = useState(false);
 
   const saveToHistory = (type: HistoryItem['type'], input: string, result: any) => {
@@ -225,7 +239,8 @@ const ScriptProcessor = ({
   loading,
   setLoading,
   progress,
-  setProgress
+  setProgress,
+  titleResult
 }: { 
   model: string, 
   onScriptGenerated: (script: string) => void,
@@ -236,11 +251,69 @@ const ScriptProcessor = ({
   loading: boolean,
   setLoading: (b: boolean) => void,
   progress: string,
-  setProgress: (s: string) => void
+  setProgress: (s: string) => void,
+  titleResult: string
 }) => {
   const [copied, setCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const funnyMessages = [
+    "Dạ em đang nhập vai Biên tập viên quốc tế để phục vụ sếp Huy Bơ đây ạ!",
+    "Đang mài giũa từng câu chữ cho thật sắc bén, sếp Huy Bơ đợi em xíu nhé...",
+    "Kịch bản đang dần hiện rõ vẻ đẳng cấp, thưa sếp Huy Bơ...",
+    "Sự tinh tế đang được thổi hồn vào từng đoạn văn cho sếp...",
+    "Em đang dồn hết tâm huyết để tạo ra một kiệt tác cho sếp đây...",
+    "Vẻ đẹp của ngôn từ đang tỏa sáng, sếp Huy Bơ thấy sao ạ?",
+    "Sắp xong rồi sếp ơi, kịch bản này chắc chắn sẽ bùng nổ luôn...",
+    "Em đang kiểm tra lại độ dài để đảm bảo hoàn hảo nhất cho sếp...",
+    "Từng con số, địa danh đang được em sắp xếp vô cùng tỉ mỉ...",
+    "Sếp Huy Bơ cứ thong thả nhâm nhi cafe, phần còn lại cứ để em lo!"
+  ];
+
+  const startProgressRotation = () => {
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    let index = 0;
+    setProgress(funnyMessages[0]);
+    progressIntervalRef.current = setInterval(() => {
+      index = (index + 1) % funnyMessages.length;
+      setProgress(funnyMessages[index]);
+    }, 10000);
+  };
+
+  const stopProgressRotation = () => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => stopProgressRotation();
+  }, []);
+
+  const handleDownload = () => {
+    if (!result) return;
+    
+    // Clean up title for filename
+    let fileName = titleResult 
+      ? titleResult.replace(/[【】]/g, '').trim() 
+      : 'kich-ban-huy-bo';
+    
+    // Remove special characters that might break filenames
+    fileName = fileName.replace(/[/\\?%*:|"<>]/g, '-');
+    
+    const blob = new Blob([result], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${fileName}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const huyBoMessages = [
     "Khởi đầu hành trình kiến tạo kiệt tác cho sếp Huy Bơ...",
@@ -269,86 +342,156 @@ const ScriptProcessor = ({
     if (!input.trim()) return;
     setLoading(true);
     setResult('');
-    setProgress('Dạ em đang nhập vai Biên tập viên quốc tế để phục vụ sếp Huy Bơ đây ạ!');
+    startProgressRotation();
     
     try {
       const originalCharCount = input.length;
       // Split by paragraphs
-      const paragraphs = input.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+      let rawParagraphs = input.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+      
+      // Thuật toán chia nhỏ đoạn văn để tránh AI tóm tắt (giới hạn 1000 ký tự mỗi đoạn để cân bằng tốc độ và độ chính xác)
+      const maxParaLength = 1000;
+      const paragraphs: string[] = [];
+      
+      rawParagraphs.forEach(para => {
+        if (para.length > maxParaLength) {
+          const sentences = para.match(/[^.!?]+[.!?]+/g) || [para];
+          let currentChunk = "";
+          sentences.forEach(sentence => {
+            if ((currentChunk + sentence).length > maxParaLength && currentChunk.length > 0) {
+              paragraphs.push(currentChunk.trim());
+              currentChunk = sentence;
+            } else {
+              currentChunk += (currentChunk ? " " : "") + sentence;
+            }
+          });
+          if (currentChunk) paragraphs.push(currentChunk.trim());
+        } else {
+          paragraphs.push(para);
+        }
+      });
       
       let finalScriptParts = new Array(paragraphs.length).fill('');
       let completedCount = 0;
+      let highlights = '';
 
-      const systemInstruction = `Bạn là một biên tập viên bản tin thời sự quốc tế kỳ cựu, chuyên viết kịch bản voice-over cho video và phát thanh.
+      // Chạy song song: Tạo Highlights và bắt đầu xử lý các đoạn văn cùng lúc
+      const highlightsPromise = (async () => {
+        try {
+          const highlightsPrompt = `Dựa trên kịch bản sau, hãy viết một đoạn mở đầu "Điểm tin chính" CỰC KỲ NGẮN GỌN (khoảng 15-20 giây) theo phong cách bản tin truyền hình.
+          
+          Yêu cầu:
+          - Mở đầu bằng: "Trong bản tin hôm nay..."
+          - Liệt kê 3 tin nổi bật nhất, mỗi tin CHỈ 1 CÂU CỰC NGẮN.
+          - Kết thúc bằng: "Ngay sau đây là nội dung chi tiết."
+          - Tổng độ dài phần này không nên quá 300-400 ký tự.
+          
+          Kịch bản gốc:
+          ${input.substring(0, 3000)}...`;
+          
+          const highlightsRes = await getGeminiResponse(highlightsPrompt, "Bạn là chuyên gia biên tập bản tin thời sự. Chỉ trả về phần điểm tin chính.", model);
+          highlights = highlightsRes || '';
+        } catch (hError) {
+          console.error("Error generating highlights:", hError);
+          highlights = "Trong bản tin hôm nay, chúng tôi sẽ cập nhật các diễn biến quan trọng nhất. Ngay sau đây là nội dung chi tiết.";
+        }
+      })();
 
-Mục tiêu của bạn KHÔNG phải là sáng tạo tự do. Nhiệm vụ là viết lại nội dung gốc thành một kịch bản mới nhưng vẫn giữ gần như nguyên vẹn: cấu trúc, thứ tự triển khai, nhịp độ, mức độ kịch tính, số lượng ý, mật độ thông tin, cảm xúc, độ dài.
+      const systemInstruction = `BẠN LÀ MỘT BIÊN TẬP VIÊN THỜI SỰ QUỐC TẾ CỰC KỲ NGHIÊM TÚC VÀ CHI TIẾT.
+      
+QUY TẮC TỐI THƯỢNG: TUYỆT ĐỐI KHÔNG ĐƯỢC TÓM TẮT NHƯNG CŨNG KHÔNG ĐƯỢC VIẾT LAN MAN.
+Sếp Huy Bơ yêu cầu kịch bản mới phải có độ dài TƯƠNG ĐƯƠNG TUYỆT ĐỐI với kịch bản gốc (sai số tối đa ±10%).
+
+Nhiệm vụ: Viết lại nội dung gốc thành kịch bản mới, giữ nguyên: cấu trúc, thứ tự, nhịp độ, số lượng ý, mật độ thông tin, cảm xúc.
 
 ====================
 YÊU CẦU VĂN PHONG
 ====================
-Kịch bản phải được viết theo phong cách bản tin thời sự quốc tế chuyên nghiệp, trang trọng, dồn dập và kịch tính.
-Bắt buộc mở đầu toàn bộ kịch bản bằng đúng câu sau: "Kính chào quý vị đến với những tin tức thời sự vừa được cập nhật mới nhất của chúng tôi. Sau đây là phần tin chi tiết. Mời quý vị cùng theo dõi."
-
-Sau phần mở đầu, mỗi sự kiện hoặc mỗi phần nội dung phải bắt đầu bằng một headline ngắn, mạnh, sắc bén, có tính cảnh báo hoặc gây chú ý nhưng vẫn khách quan.
-Giọng văn phải: nghiêm túc, dồn dập, mang sắc thái địa chính trị, tạo cảm giác cấp bách.
-
-Ưu tiên sử dụng các cụm từ: leo thang căng thẳng, đối đầu chiến lược, răn đe quân sự, xoay trục địa chính trị, hệ lụy nghiêm trọng, động thái chưa từng có, áp lực gia tăng, nguy cơ bùng phát, phản ứng cứng rắn, cục diện khu vực, kịch bản xấu nhất, làn ranh đỏ, khủng hoảng ngoại giao, sức ép quân sự, thế trận mới, cuộc chạy đua vũ trang, nguy cơ mất kiểm soát.
-
-Khi nhắc đến nhân vật, luôn đặt chức danh trước tên riêng.
-Khi nhắc đến sự kiện, bắt buộc ưu tiên đưa thêm: con số cụ thể, thời gian, địa danh, tên khí tài, vũ khí, chiến hạm, hệ thống phòng thủ, đơn vị quân đội, số thương vong, số lượng binh sĩ, khoảng cách, phạm vi tác chiến.
-
-Chuyển ý giữa các đoạn bằng các cụm từ: Trong khi đó, Ở chiều ngược lại, Trong bối cảnh..., Tuy nhiên, Đáng chú ý, Cùng thời điểm, Theo các chuyên gia, Một diễn biến khác, Không chỉ dừng lại ở đó.
+- Phong cách thời sự quốc tế chuyên nghiệp, trang trọng, dồn dập, kịch tính.
+- Mỗi phần phải có headline ngắn, mạnh.
+- Giọng văn: nghiêm túc, mang sắc thái địa chính trị.
+- Ưu tiên thuật ngữ: leo thang căng thẳng, đối đầu chiến lược, răn đe quân sự, xoay trục địa chính trị, hệ lụy nghiêm trọng...
+- Luôn đặt chức danh trước tên riêng.
+- Bắt buộc đưa thêm: con số cụ thể, thời gian, địa danh, tên khí tài, vũ khí...
 
 ====================
-QUY TẮC BẮT BUỘC VỀ NỘI DUNG
+QUY TẮC BẮT BUỘC VỀ ĐỘ DÀI
 ====================
-1. Kịch bản mới phải bám sát tối đa nội dung kịch bản gốc. Không tự ý thêm chủ đề mới. Không bỏ luận điểm, chi tiết. Không viết tóm tắt. Không thay đổi thứ tự.
-2. Mỗi đoạn trong kịch bản gốc phải tương ứng chính xác với một đoạn trong kịch bản mới (1:1).
-3. Độ dài của từng đoạn chỉ được phép chênh lệch tối đa ±10% so với đoạn tương ứng trong bản gốc.`;
+1. Độ dài kịch bản mới phải xấp xỉ 100% độ dài kịch bản gốc.
+2. Nếu thiếu ý, hãy diễn giải sâu hơn về bối cảnh địa chính trị.
+3. Nếu thừa ý, hãy lược bỏ các từ ngữ sáo rỗng, tập trung vào thông tin cốt lõi.
+4. Mỗi đoạn mới phải đạt từ 95% đến 105% số ký tự của đoạn gốc tương ứng.`;
 
-      const batchSize = 1; // Process one by one to make progress messages more visible
+      const batchSize = 8; // Tăng lên 8 để xử lý siêu tốc
       for (let i = 0; i < paragraphs.length; i += batchSize) {
         const batch = paragraphs.slice(i, i + batchSize);
         const batchPromises = batch.map(async (para, index) => {
           const actualIndex = i + index;
           const paraCharCount = para.length;
           
-          const prompt = `Viết lại đoạn văn sau theo phong cách thời sự quốc tế. 
-          
-          YÊU CẦU ĐỘ DÀI: Đoạn gốc có ${paraCharCount} ký tự. Đoạn mới phải có độ dài xấp xỉ ${paraCharCount} ký tự (sai số tối đa 10%).
-          
-          NỘI DUNG ĐOẠN GỐC:
-          ${para}
-          
-          QUY TRÌNH THỰC HIỆN:
-          1. Xác định ý chính, cảm xúc và vai trò của đoạn này.
-          2. Viết lại đoạn văn giữ nguyên ý và cảm xúc nhưng dùng văn phong thời sự quốc tế.
-          3. Nếu đây là đoạn đầu tiên của kịch bản, hãy bắt đầu bằng headline sắc bén sau câu chào mở đầu.
-          4. Nếu không phải đoạn đầu, hãy sử dụng từ nối chuyển ý phù hợp.
-          5. Tự kiểm tra độ dài để đảm bảo nằm trong khoảng ±10% của ${paraCharCount} ký tự.`;
+          try {
+            const prompt = `NHIỆM VỤ: Viết lại đoạn văn sau theo phong cách thời sự quốc tế.
+            
+            YÊU CẦU NGHIÊM NGẶT VỀ ĐỘ DÀI: 
+            - ĐỘ DÀI GỐC: ${paraCharCount} ký tự.
+            - MỤC TIÊU: Phải đạt xấp xỉ ${paraCharCount} ký tự (sai số tối đa ±10%).
+            
+            NỘI DUNG ĐOẠN GỐC:
+            ${para}
+            
+            HƯỚNG DẪN:
+            - Diễn giải chi tiết, không bỏ sót thông tin.
+            - Sử dụng các cụm từ chuyên môn, tính từ mạnh.
+            - Bắt đầu bằng một Headline sắc bén.`;
 
-          const res = await getGeminiResponse(prompt, systemInstruction, model);
-          if (res) {
-            finalScriptParts[actualIndex] = res.trim();
+            let res = await getGeminiResponse(prompt, systemInstruction, model);
+            
+            // Thuật toán cưỡng bức độ dài (Chỉ retry nếu lệch quá 15% để tiết kiệm thời gian)
+            if (res) {
+              if (res.length < paraCharCount * 0.85) {
+                const expandPrompt = `Đoạn văn quá ngắn (${res.length} ký tự). Viết lại và mở rộng để đạt xấp xỉ ${paraCharCount} ký tự.
+                NỘI DUNG GỐC: ${para}`;
+                const expandedRes = await getGeminiResponse(expandPrompt, systemInstruction, model);
+                if (expandedRes) res = expandedRes;
+              } else if (res.length > paraCharCount * 1.15) {
+                const condensePrompt = `Đoạn văn quá dài (${res.length} ký tự). Viết lại súc tích hơn để đạt xấp xỉ ${paraCharCount} ký tự.
+                NỘI DUNG VỪA VIẾT: ${res}`;
+                const condensedRes = await getGeminiResponse(condensePrompt, systemInstruction, model);
+                if (condensedRes) res = condensedRes;
+              }
+            }
+
+            if (res) {
+              finalScriptParts[actualIndex] = res.trim();
+            } else {
+              finalScriptParts[actualIndex] = `[Lỗi xử lý đoạn này]`;
+            }
+          } catch (err) {
+            console.error(`Error processing paragraph ${actualIndex}:`, err);
+            finalScriptParts[actualIndex] = `[Lỗi API ở đoạn này]`;
+          } finally {
             completedCount++;
-            const msg = huyBoMessages[completedCount - 1] || `Đã hoàn thành ${completedCount}/${paragraphs.length} đoạn cho sếp Huy Bơ...`;
-            setProgress(msg);
-            setResult(finalScriptParts.filter(p => p !== '').join('\n\n'));
+            const progressMsg = `Đang xử lý: ${completedCount}/${paragraphs.length} đoạn... (Sếp Huy Bơ đợi em xíu nhé)`;
+            setProgress(progressMsg);
+            
+            // Hiển thị kết quả tạm thời (bao gồm cả highlights nếu đã xong)
+            const currentMainContent = finalScriptParts.filter(p => p !== '').join('\n\n');
+            setResult(highlights ? `${highlights}\n\n${currentMainContent}` : currentMainContent);
           }
         });
         await Promise.all(batchPromises);
-        if (i + batchSize < paragraphs.length) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
-        }
+        // Loại bỏ hoàn toàn delay để đạt tốc độ tối đa
       }
 
-      const intro = "Kính chào quý vị đến với những tin tức thời sự vừa được cập nhật mới nhất của chúng tôi. Sau đây là phần tin chi tiết. Mời quý vị cùng theo dõi.";
+      // Đợi highlights hoàn thành nếu chưa xong
+      await highlightsPromise;
+
       const mainContent = finalScriptParts.join('\n\n');
-      const finalFullScript = `${intro}\n\n${mainContent}`;
+      const finalFullScript = `${highlights}\n\n${mainContent}`;
       
       const newCharCount = finalFullScript.length;
       const diffRatio = ((newCharCount - originalCharCount) / originalCharCount * 100).toFixed(2);
-      const status = Math.abs(parseFloat(diffRatio)) <= 3 ? "PASS" : "CHECK REQUIRED (±3% limit)";
+      const status = Math.abs(parseFloat(diffRatio)) <= 10 ? "PASS (Tỷ lệ vàng)" : "CHECK REQUIRED (Vượt ngưỡng ±10%)";
 
       const header = `Số ký tự kịch bản gốc: ${originalCharCount}\nSố ký tự kịch bản mới: ${newCharCount}\nTỷ lệ chênh lệch: ${diffRatio}%\nKết quả kiểm tra: ${status}\n\n====================\n\n`;
       
@@ -367,13 +510,16 @@ QUY TẮC BẮT BUỘC VỀ NỘI DUNG
       const history = JSON.parse(localStorage.getItem('j_processor_history') || '[]');
       localStorage.setItem('j_processor_history', JSON.stringify([historyItem, ...history]));
 
+      stopProgressRotation();
       setProgress('');
     } catch (error) {
       console.error(error);
+      stopProgressRotation();
       setResult('Lỗi khi xử lý kịch bản theo thuật toán mới. Sếp Huy Bơ vui lòng thử lại ạ.');
       setProgress('');
     } finally {
       setLoading(false);
+      stopProgressRotation();
     }
   };
 
@@ -490,10 +636,16 @@ QUY TẮC BẮT BUỘC VỀ NỘI DUNG
             </div>
           )}
         </div>
-        <button onClick={copyToClipboard} disabled={!result} className="btn-secondary w-full flex items-center justify-center gap-2">
-          {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-          {copied ? 'ĐÃ SAO CHÉP XONG' : 'SAO CHÉP KỊCH BẢN'}
-        </button>
+        <div className="flex gap-3">
+          <button onClick={copyToClipboard} disabled={!result} className="btn-secondary flex-1 flex items-center justify-center gap-2">
+            {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+            {copied ? 'ĐÃ SAO CHÉP' : 'SAO CHÉP'}
+          </button>
+          <button onClick={handleDownload} disabled={!result} className="btn-secondary flex-1 flex items-center justify-center gap-2">
+            <Download className="w-4 h-4 text-indigo-500" />
+            TẢI KỊCH BẢN
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -765,7 +917,8 @@ const SEOProcessor = ({
   }, [initialScript]);
 
   useEffect(() => {
-    if (script && script !== lastProcessed && !loading) {
+    // Chỉ tự động chạy nếu chưa có kết quả và có script
+    if (script && !result && !loading) {
       handleProcess();
     }
   }, [script]);
@@ -1234,6 +1387,11 @@ export default function App() {
   const [model, setModel] = useState('gemini-3-flash-preview');
   const [generatedScript, setGeneratedScript] = useState('');
   
+  // Title state lifted to App
+  const [titleInput, setTitleInput] = useState('');
+  const [titleResult, setTitleResult] = useState('');
+  const [titleLoading, setTitleLoading] = useState(false);
+
   // Script state lifted to App to prevent loss on tab switch
   const [scriptInput, setScriptInput] = useState('');
   const [scriptResult, setScriptResult] = useState('');
@@ -1268,7 +1426,17 @@ export default function App() {
       <main className="flex-grow container mx-auto px-4 py-8">
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="h-full">
-            {activeTab === 'title' && <TitleProcessor model={model} />}
+            {activeTab === 'title' && (
+              <TitleProcessor 
+                model={model} 
+                input={titleInput}
+                setInput={setTitleInput}
+                result={titleResult}
+                setResult={setTitleResult}
+                loading={titleLoading}
+                setLoading={setTitleLoading}
+              />
+            )}
             {activeTab === 'script' && (
               <ScriptProcessor 
                 model={model} 
@@ -1281,6 +1449,7 @@ export default function App() {
                 setLoading={setScriptLoading}
                 progress={scriptProgress}
                 setProgress={setScriptProgress}
+                titleResult={titleResult}
               />
             )}
             {activeTab === 'prompt-analysis' && (
